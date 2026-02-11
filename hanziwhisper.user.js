@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         识字释文 HanziWhisper
 // @namespace    http://tampermonkey.net/
-// @version      0.1.0
-// @description  按住Alt键选中汉字，显示拼音、笔画、部首和释义
+// @version      0.3.0
+// @description  按住Alt键选中汉字，显示拼音、笔画、部首和释义；支持手写输入
 // @author       HanziWhisper
 // @match        *://*/*
 // @grant        GM_setValue
@@ -10,8 +10,10 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
 // @connect      fastly.jsdelivr.net
+// @connect      api.easyocr.org
 // @require      https://fastly.jsdelivr.net/npm/cnchar-all/cnchar.all.min.js
 // @require      https://fastly.jsdelivr.net/npm/cnchar-draw/cnchar.draw.min.js
+// @require      https://cdn.jsdelivr.net/npm/tesseract.js@5.0.0/dist/tesseract.min.js
 // @run-at       document-end
 // ==/UserScript==
 
@@ -57,6 +59,11 @@
     let configShadowHost = null;
     let configShadowRoot = null;
     let configModal = null;
+    let handwritingShadowHost = null;
+    let handwritingShadowRoot = null;
+    let handwritingCanvas = null;
+    let handwritingContext = null;
+    let isDrawing = false;
     const config = getConfig();
 
     // 防抖函数
@@ -291,6 +298,7 @@
             content = `
                 <div class="hw-popup-header">
                     <span class="hw-popup-title">${info.text}</span>
+                    <span class="hw-popup-play" title="播放读音" style="cursor:pointer;font-size:18px;margin-left:8px;">🔊</span>
                     <span class="hw-popup-close">×</span>
                 </div>
                 <div class="hw-popup-content">
@@ -300,6 +308,7 @@
             content = `
                 <div class="hw-popup-header">
                     <span class="hw-popup-title">${info.text}</span>
+                    <span class="hw-popup-play" title="播放读音" style="cursor:pointer;font-size:18px;margin-left:8px;">🔊</span>
                     <span class="hw-popup-close">×</span>
                 </div>
                 <div class="hw-popup-content">
@@ -349,7 +358,29 @@
         if (popupCloseBtn) {
             popupCloseBtn.addEventListener('click', hidePopup);
         }
+        // 绑定播放按钮
+        const popupPlayBtn = popup.querySelector('.hw-popup-play');
+        if (popupPlayBtn && info && info.text) {
+            popupPlayBtn.addEventListener('click', () => {
+                playHanziAudio(info.text);
+            });
+        }
         popup.style.display = 'block';
+    // 播放汉字读音
+    function playHanziAudio(text) {
+        if (!text) return;
+        // 优先使用浏览器SpeechSynthesis
+        if ('speechSynthesis' in window) {
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'zh-CN';
+            utter.rate = 1;
+            utter.pitch = 1;
+            window.speechSynthesis.speak(utter);
+        } else {
+            // 兼容方案：可扩展为调用第三方API
+            alert('当前浏览器不支持语音播放功能');
+        }
+    }
 
         // 计算弹窗位置
         const popupRect = popup.getBoundingClientRect();
@@ -930,20 +961,793 @@
         }
     });
 
-    // 暴露全局方法
-    window.hanziwhisper = {
-        hidePopup: hidePopup,
-        getConfig: getConfig,
-        saveConfig: saveConfig,
-        openConfig: openConfig,
-        closeConfig: closeConfig,
-        saveConfigFromUI: saveConfigFromUI,
-        resetConfig: resetConfig
-    };
+    // 创建手写识别页面样式
+    function createHandwritingStyles() {
+        return `
+            .hw-handwriting-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 2147483646;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+            .hw-handwriting-modal {
+                background: #ffffff;
+                border-radius: 12px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+                width: 90%;
+                max-width: 600px;
+                max-height: 90vh;
+                overflow-y: auto;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+                display: flex;
+                flex-direction: column;
+            }
+            .hw-handwriting-modal.dark {
+                background: #1e1e1e;
+                color: #e0e0e0;
+            }
+            .hw-handwriting-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 20px 24px;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-header {
+                border-bottom-color: #333;
+            }
+            .hw-handwriting-title {
+                font-size: 20px;
+                font-weight: 600;
+                color: #1976d2;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-title {
+                color: #64b5f6;
+            }
+            .hw-handwriting-close {
+                cursor: pointer;
+                color: #999;
+                font-size: 24px;
+                line-height: 1;
+                padding: 4px;
+                transition: color 0.2s;
+            }
+            .hw-handwriting-close:hover {
+                color: #333;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-close:hover {
+                color: #fff;
+            }
+            .hw-handwriting-body {
+                padding: 20px 24px;
+                flex: 1;
+                overflow-y: auto;
+            }
+            .hw-handwriting-canvas-wrapper {
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                background: #fff;
+                overflow: hidden;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-canvas-wrapper {
+                background: #2d2d2d;
+                border-color: #444;
+            }
+            #hw-handwriting-canvas {
+                display: block;
+                cursor: crosshair;
+                background: white;
+                touch-action: none;
+            }
+            .hw-handwriting-modal.dark #hw-handwriting-canvas {
+                background: #2d2d2d;
+            }
+            .hw-handwriting-results {
+                margin-top: 20px;
+            }
+            .hw-handwriting-result-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #666;
+                margin-bottom: 10px;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-result-title {
+                color: #aaa;
+            }
+            .hw-handwriting-result-items {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .hw-handwriting-result-item {
+                padding: 8px 12px;
+                background: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: all 0.2s;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-result-item {
+                background: #333;
+                border-color: #444;
+                color: #e0e0e0;
+            }
+            .hw-handwriting-result-item:hover {
+                background: #1976d2;
+                color: white;
+                border-color: #1976d2;
+            }
+            .hw-handwriting-result-item.selected {
+                background: #1976d2;
+                color: white;
+                border-color: #1976d2;
+            }
+            .hw-handwriting-controls {
+                display: flex;
+                gap: 12px;
+                margin-bottom: 20px;
+                flex-wrap: wrap;
+            }
+            .hw-handwriting-btn {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .hw-handwriting-btn-primary {
+                background: #1976d2;
+                color: white;
+            }
+            .hw-handwriting-btn-primary:hover {
+                background: #1565c0;
+            }
+            .hw-handwriting-btn-secondary {
+                background: #f5f5f5;
+                color: #666;
+                border: 1px solid #ddd;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-btn-secondary {
+                background: #333;
+                color: #aaa;
+                border-color: #444;
+            }
+            .hw-handwriting-btn-secondary:hover {
+                background: #e0e0e0;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-btn-secondary:hover {
+                background: #444;
+            }
+            .hw-handwriting-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 12px;
+                padding: 16px 24px;
+                border-top: 1px solid #e0e0e0;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-footer {
+                border-top-color: #333;
+            }
+            .hw-handwriting-btn-cancel {
+                background: #f5f5f5;
+                color: #666;
+            }
+            .hw-handwriting-btn-cancel:hover {
+                background: #e0e0e0;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-btn-cancel {
+                background: #333;
+                color: #999;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-btn-cancel:hover {
+                background: #444;
+            }
+            .hw-handwriting-btn-confirm {
+                background: #1976d2;
+                color: white;
+            }
+            .hw-handwriting-btn-confirm:hover {
+                background: #1565c0;
+            }
+            .hw-handwriting-info {
+                font-size: 12px;
+                color: #999;
+                margin-top: 10px;
+            }
+            .hw-handwriting-modal.dark .hw-handwriting-info {
+                color: #777;
+            }
+        `;
+    }
+
+    // 创建手写识别页面 HTML
+    function createHandwritingHTML() {
+        return `
+            <div class="hw-handwriting-overlay">
+                <div class="hw-handwriting-modal ${config.theme === 'dark' ? 'dark' : ''}">
+                    <div class="hw-handwriting-header">
+                        <span class="hw-handwriting-title">✍️ 手写识别汉字</span>
+                        <span class="hw-handwriting-close">×</span>
+                    </div>
+                    <div class="hw-handwriting-body">
+                        <div class="hw-handwriting-controls">
+                            <button class="hw-handwriting-btn hw-handwriting-btn-primary" id="hw-handwriting-recognize">🔍 识别</button>
+                            <button class="hw-handwriting-btn hw-handwriting-btn-secondary" id="hw-handwriting-clear">🗑️ 清除</button>
+                            <button class="hw-handwriting-btn hw-handwriting-btn-secondary" id="hw-handwriting-manual">⌨️ 手动输入</button>
+                        </div>
+                        <div class="hw-handwriting-manual-tip" style="margin-bottom:12px;color:#1976d2;font-size:13px;">
+                            ℹ️ 如果不认识的汉字手写无法识别或识别不正确，可点击“手动输入”按钮，<br>
+                            并尝试打开系统虚拟键盘的手写输入，或使用输入法的U模式（如“u+拆分笔画”）输入。
+                        </div>
+                        <div class="hw-handwriting-canvas-wrapper">
+                            <canvas id="hw-handwriting-canvas" width="550" height="350"></canvas>
+                        </div>
+                        <div class="hw-handwriting-info">
+                            💡 <strong>使用提示：</strong>在画布中央手写单个汉字（尽量写大、清晰），点击"识别"查看结果<br>
+                            📌 参考辅助线书写，识别后点击汉字即可查看详细信息
+                        </div>
+                        <div class="hw-handwriting-results">
+                            <div class="hw-handwriting-result-title">识别结果（点击查看详情）：</div>
+                            <div class="hw-handwriting-result-items" id="hw-handwriting-result-items">
+                                <span style="color: #999;">暂无结果</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hw-handwriting-footer">
+                        <button class="hw-handwriting-btn hw-handwriting-btn-cancel" id="hw-handwriting-cancel">关闭</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // 打开手写识别页面
+    function openHandwriting() {
+        if (handwritingShadowHost) {
+            return;
+        }
+
+        handwritingShadowHost = document.createElement('div');
+        handwritingShadowHost.id = 'hw-handwriting-shadow-host';
+        document.body.appendChild(handwritingShadowHost);
+
+        handwritingShadowRoot = handwritingShadowHost.attachShadow({ mode: 'open' });
+
+        const style = document.createElement('style');
+        style.textContent = createHandwritingStyles();
+        handwritingShadowRoot.appendChild(style);
+
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = createHandwritingHTML();
+        handwritingShadowRoot.appendChild(wrapper);
+
+        // 绑定事件
+        const closeBtn = wrapper.querySelector('.hw-handwriting-close');
+        if (closeBtn) closeBtn.addEventListener('click', closeHandwriting);
+
+        const cancelBtn = wrapper.querySelector('#hw-handwriting-cancel');
+        if (cancelBtn) cancelBtn.addEventListener('click', closeHandwriting);
+
+        const clearBtn = wrapper.querySelector('#hw-handwriting-clear');
+        if (clearBtn) clearBtn.addEventListener('click', clearCanvas);
+
+        const manualBtn = wrapper.querySelector('#hw-handwriting-manual');
+        if (manualBtn) manualBtn.addEventListener('click', showManualInputOption);
+
+        const recognizeBtn = wrapper.querySelector('#hw-handwriting-recognize');
+        if (recognizeBtn) recognizeBtn.addEventListener('click', recognizeHandwriting);
+
+        // 初始化画布
+        const canvasEl = handwritingShadowRoot.querySelector('#hw-handwriting-canvas');
+        handwritingCanvas = canvasEl;
+        handwritingContext = canvasEl.getContext('2d', { willReadFrequently: true });
+        // 填充白色背景
+        handwritingContext.fillStyle = '#fff';
+        handwritingContext.fillRect(0, 0, handwritingCanvas.width, handwritingCanvas.height);
+        // 绘制辅助线
+        drawGuideLines();
+        // 设置画布样式
+        handwritingContext.strokeStyle = '#000';
+        handwritingContext.lineWidth = 5;
+        handwritingContext.lineCap = 'round';
+        handwritingContext.lineJoin = 'round';
+
+        // 绑定画布事件
+        initCanvasEvents();
+    }
+
+    // 关闭手写识别页面
+    function closeHandwriting() {
+        if (handwritingShadowHost) {
+            handwritingShadowHost.remove();
+            handwritingShadowHost = null;
+            handwritingShadowRoot = null;
+            handwritingCanvas = null;
+            handwritingContext = null;
+        }
+    }
+
+    // 初始化画布事件
+    function initCanvasEvents() {
+        const canvas = handwritingCanvas;
+        
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            handwritingContext.beginPath();
+            handwritingContext.moveTo(x, y);
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            handwritingContext.lineTo(x, y);
+            handwritingContext.stroke();
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDrawing = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDrawing = false;
+        });
+
+        // 触屏支持
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            handwritingContext.beginPath();
+            handwritingContext.moveTo(x, y);
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            handwritingContext.lineTo(x, y);
+            handwritingContext.stroke();
+        });
+
+        canvas.addEventListener('touchend', () => {
+            isDrawing = false;
+        });
+    }
+
+    // 清除画布
+    function clearCanvas() {
+        if (handwritingContext) {
+            // 填充白色背景
+            handwritingContext.fillStyle = '#fff';
+            handwritingContext.fillRect(0, 0, handwritingCanvas.width, handwritingCanvas.height);
+            // 重新绘制辅助线
+            drawGuideLines();
+            // 重设画笔
+            handwritingContext.strokeStyle = '#000';
+            handwritingContext.lineWidth = 5;
+            handwritingContext.lineCap = 'round';
+            handwritingContext.lineJoin = 'round';
+            if (handwritingShadowRoot) {
+                const resultItems = handwritingShadowRoot.querySelector('#hw-handwriting-result-items');
+                if (resultItems) {
+                    resultItems.innerHTML = '<span style="color: #999;">暂无结果</span>';
+                }
+                const insertBtn = handwritingShadowRoot.querySelector('#hw-handwriting-insert');
+                if (insertBtn) insertBtn.style.display = 'none';
+            }
+        }
+    }
+
+    // 撤销
+    function undoCanvas() {
+        // 简单的撤销实现，重新绘制（仅作演示）
+        clearCanvas();
+    }
+
+    // 高级图像预处理函数
+    function preprocessImage(canvas) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        tempCtx.drawImage(canvas, 0, 0);
+        
+        let imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imgData.data;
+        
+        // 步骤1: 转换为灰度图
+        const grayData = new Uint8Array(tempCanvas.width * tempCanvas.height);
+        for (let i = 0; i < data.length; i += 4) {
+            const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+            grayData[i / 4] = gray;
+        }
+        
+        // 步骤2: 计算Otsu阈值（自适应二值化）
+        const histogram = new Array(256).fill(0);
+        for (let i = 0; i < grayData.length; i++) {
+            histogram[grayData[i]]++;
+        }
+        
+        const total = grayData.length;
+        let sum = 0;
+        for (let i = 0; i < 256; i++) {
+            sum += i * histogram[i];
+        }
+        
+        let sumB = 0;
+        let wB = 0;
+        let wF = 0;
+        let maxVariance = 0;
+        let threshold = 0;
+        
+        for (let t = 0; t < 256; t++) {
+            wB += histogram[t];
+            if (wB === 0) continue;
+            
+            wF = total - wB;
+            if (wF === 0) break;
+            
+            sumB += t * histogram[t];
+            const mB = sumB / wB;
+            const mF = (sum - sumB) / wF;
+            const variance = wB * wF * (mB - mF) * (mB - mF);
+            
+            if (variance > maxVariance) {
+                maxVariance = variance;
+                threshold = t;
+            }
+        }
+        
+        // 步骤3: 应用二值化（反色处理，黑字白底）
+        for (let i = 0; i < grayData.length; i++) {
+            const value = grayData[i] > threshold ? 255 : 0;
+            const idx = i * 4;
+            data[idx] = data[idx + 1] = data[idx + 2] = value;
+        }
+        
+        // 步骤4: 形态学处理 - 去除噪点（可选的中值滤波）
+        const filterRadius = 1;
+        const filtered = new Uint8ClampedArray(data);
+        for (let y = filterRadius; y < tempCanvas.height - filterRadius; y++) {
+            for (let x = filterRadius; x < tempCanvas.width - filterRadius; x++) {
+                const values = [];
+                for (let fy = -filterRadius; fy <= filterRadius; fy++) {
+                    for (let fx = -filterRadius; fx <= filterRadius; fx++) {
+                        const idx = ((y + fy) * tempCanvas.width + (x + fx)) * 4;
+                        values.push(data[idx]);
+                    }
+                }
+                values.sort((a, b) => a - b);
+                const median = values[Math.floor(values.length / 2)];
+                const idx = (y * tempCanvas.width + x) * 4;
+                filtered[idx] = filtered[idx + 1] = filtered[idx + 2] = median;
+            }
+        }
+        
+        imgData.data.set(filtered);
+        tempCtx.putImageData(imgData, 0, 0);
+        
+        return tempCanvas;
+    }
+
+    // 调用云端API识别手写汉字
+    async function recognizeWithCloudAPI(imageDataUrl) {
+        try {
+            // 将 base64 图片转换为 Blob
+            const response = await fetch(imageDataUrl);
+            const blob = await response.blob();
+            
+            // 创建 FormData
+            const formData = new FormData();
+            formData.append('file', blob, 'handwriting.png');
+            
+            // 调用云端API (EasyOCR)
+            const apiResponse = await fetch('https://api.easyocr.org/ocr', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!apiResponse.ok) {
+                throw new Error(`API请求失败: ${apiResponse.status}`);
+            }
+            
+            const result = await apiResponse.json();
+            
+            // 解析新的返回格式: { "words": [{ "text": "十", "rate": 0.93, ... }] }
+            if (result && result.words && Array.isArray(result.words) && result.words.length > 0) {
+                // 提取所有识别到的文字，按识别率排序
+                const sortedWords = result.words.sort((a, b) => (b.rate || 0) - (a.rate || 0));
+                const recognizedTexts = sortedWords.map(word => word.text);
+                const recognizedText = recognizedTexts.join('');
+                console.log('HanziWhisper: 云端API识别结果:', recognizedText, '| 识别率:', sortedWords[0]?.rate);
+                return recognizedText;
+            } else {
+                throw new Error('API未返回有效结果');
+            }
+        } catch (error) {
+            console.warn('HanziWhisper: 云端API识别失败，将使用本地识别', error);
+            throw error;
+        }
+    }
+
+    // 使用本地Tesseract.js识别手写汉字
+    async function recognizeWithLocalOCR(imageUrl, resultItems) {
+        if (typeof Tesseract === 'undefined') {
+            throw new Error('OCR库加载失败，请刷新页面后重试');
+        }
+
+        // 初始化Worker（如果尚未初始化）
+        if (!window.hwTesseractWorker) {
+            let createWorker = null;
+            if (typeof Tesseract.createWorker === 'function') {
+                createWorker = Tesseract.createWorker;
+            } else if (Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
+                createWorker = Tesseract.default.createWorker;
+            }
+            
+            if (createWorker) {
+                if (resultItems) {
+                    resultItems.innerHTML = '<span style="color: #999;">首次加载本地OCR引擎，请稍候...</span>';
+                }
+                window.hwTesseractWorker = await createWorker('chi_sim+chi_tra', 1, {
+                    logger: m => console.log('OCR:', m)
+                });
+                
+                // 设置优化参数，提高手写汉字识别率
+                await window.hwTesseractWorker.setParameters({
+                    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK, // 单个文字块模式
+                    tessedit_char_whitelist: '', // 不限制字符集
+                    preserve_interword_spaces: '0',
+                });
+            }
+        }
+
+        // 执行识别
+        let text = '';
+        if (window.hwTesseractWorker && typeof window.hwTesseractWorker.recognize === 'function') {
+            if (resultItems) {
+                resultItems.innerHTML = '<span style="color: #999;">正在使用本地引擎识别...</span>';
+            }
+            const result = await window.hwTesseractWorker.recognize(imageUrl);
+            text = result.data.text || '';
+        } else if (typeof Tesseract.recognize === 'function') {
+            // 降级方案：使用静态API
+            const result = await Tesseract.recognize(imageUrl, 'chi_sim+chi_tra', {
+                logger: m => console.log('OCR:', m)
+            });
+            text = (result.data && result.data.text) || result.text || '';
+        } else {
+            throw new Error('Tesseract.js 加载失败或API不兼容');
+        }
+        
+        return text;
+    }
+
+    // 识别手写汉字（优先使用云端API，失败时使用本地Tesseract.js）
+    async function recognizeHandwriting() {
+        if (!handwritingCanvas) {
+            alert('画布初始化失败');
+            return;
+        }
+
+        // 检查是否有绘制内容
+        const imageData = handwritingContext.getImageData(0, 0, handwritingCanvas.width, handwritingCanvas.height);
+        const hasContent = imageData.data.some((val, idx) => idx % 4 === 3 && val > 128);
+        if (!hasContent) {
+            alert('请先在画布上手写汉字');
+            return;
+        }
+
+        // 显示识别中状态
+        const resultItems = handwritingShadowRoot.querySelector('#hw-handwriting-result-items');
+        if (resultItems) {
+            resultItems.innerHTML = '<span style="color: #999;">识别中，请稍候...</span>';
+        }
+
+        try {
+            let text = '';
+            let recognitionMethod = '';
+            
+            // 优先尝试云端API识别（使用原始画布图片，云端API有自己的预处理）
+            try {
+                if (resultItems) {
+                    resultItems.innerHTML = '<span style="color: #999;">正在使用云端API识别...</span>';
+                }
+                // 云端API使用原始画布图片
+                const originalImageUrl = handwritingCanvas.toDataURL('image/png');
+                text = await recognizeWithCloudAPI(originalImageUrl);
+                recognitionMethod = 'cloud';
+                console.log('HanziWhisper: 使用云端API识别成功');
+            } catch (apiError) {
+                // 云端API失败，使用本地识别（使用预处理后的图片以提高准确率）
+                console.log('HanziWhisper: 云端API识别失败，切换到本地识别');
+                if (resultItems) {
+                    resultItems.innerHTML = '<span style="color: #999;">云端识别失败，使用本地引擎...</span>';
+                }
+                // 本地识别使用预处理后的图片
+                const processedCanvas = preprocessImage(handwritingCanvas);
+                const processedImageUrl = processedCanvas.toDataURL('image/png');
+                text = await recognizeWithLocalOCR(processedImageUrl, resultItems);
+                recognitionMethod = 'local';
+                console.log('HanziWhisper: 使用本地引擎识别成功');
+            }
+
+            // 提取汉字并去重
+            const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
+            if (chineseChars.length === 0) {
+                if (resultItems) {
+                    resultItems.innerHTML = `<span style="color: #f44336;">未识别到汉字（${recognitionMethod === 'cloud' ? '云端' : '本地'}识别）。<br>提示：请写大一些、清晰一些，或点击下方手动输入</span>`;
+                }
+                // 显示手动输入按钮
+                showManualInputOption();
+                return;
+            }
+            const uniqueChars = [...new Set(chineseChars)].slice(0, 15);
+            displayRecognitionResults(uniqueChars);
+            
+            // 在控制台显示识别方式
+            console.log(`HanziWhisper: 识别完成（${recognitionMethod === 'cloud' ? '云端API' : '本地引擎'}），识别到 ${uniqueChars.length} 个汉字:`, uniqueChars.join(''));
+        } catch (e) {
+            console.error('HanziWhisper: 手写识别失败', e);
+            if (resultItems) {
+                resultItems.innerHTML = '<span style="color: #f44336;">识别出错：' + (e.message || e) + '<br>请尝试重新书写或使用手动输入</span>';
+            }
+            // 识别失败时也显示手动输入选项
+            setTimeout(() => {
+                showManualInputOption();
+            }, 2000);
+        }
+    }
+
+    // 显示手动输入选项
+    function showManualInputOption() {
+        if (!handwritingShadowRoot) return;
+
+        const resultItems = handwritingShadowRoot.querySelector('#hw-handwriting-result-items');
+        if (!resultItems) return;
+
+        resultItems.innerHTML = `
+            <div style="margin: 10px 0;">
+                <input type="text" id="hw-manual-input" placeholder="请手动输入汉字"
+                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 18px; font-family: inherit;"
+                    maxlength="1">
+                <button id="hw-manual-confirm" style="margin-top: 8px; padding: 8px 16px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; width: 100%;">
+                    确认输入
+                </button>
+            </div>
+        `;
+
+        const manualInput = handwritingShadowRoot.querySelector('#hw-manual-input');
+        const manualConfirm = handwritingShadowRoot.querySelector('#hw-manual-confirm');
+
+        if (manualConfirm) {
+            manualConfirm.addEventListener('click', () => {
+                const char = manualInput.value.trim();
+                if (char && isChinese(char)) {
+                    displayRecognitionResults([char]);
+                } else {
+                    alert('请输入有效的汉字');
+                }
+            });
+        }
+
+        if (manualInput) {
+            manualInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    manualConfirm.click();
+                }
+            });
+            manualInput.focus();
+        }
+    }
+
+    // 显示识别结果
+    function displayRecognitionResults(results) {
+        if (!handwritingShadowRoot) return;
+
+        const resultItems = handwritingShadowRoot.querySelector('#hw-handwriting-result-items');
+        const insertBtn = handwritingShadowRoot.querySelector('#hw-handwriting-insert');
+        
+        if (!resultItems) return;
+
+        // 取前10个结果
+        const topResults = results.slice(0, 10);
+        resultItems.innerHTML = topResults.map((char, index) =>
+            `<span class="hw-handwriting-result-item" data-char="${char}" data-index="${index}">${char}</span>`
+        ).join('');
+
+        // 绑定结果项点击事件 - 点击后显示该汉字的详细信息
+        const items = resultItems.querySelectorAll('.hw-handwriting-result-item');
+        items.forEach(item => {
+            item.addEventListener('click', async () => {
+                items.forEach(i => i.classList.remove('selected'));
+                item.classList.add('selected');
+                
+                const char = item.getAttribute('data-char');
+                // 直接显示汉字信息弹窗
+                if (char) {
+                    const info = await getHanziInfo(char);
+                    if (info) {
+                        // 关闭手写窗口
+                        // closeHandwriting();
+                        // 显示汉字信息
+                        showPopup(window.innerWidth / 2, window.innerHeight / 2, info, char);
+                    }
+                }
+            });
+        });
+
+        // 自动选择第一个结果
+        if (items.length > 0) {
+            items[0].classList.add('selected');
+        }
+    }
+
+    // 在画布上绘制辅助网格线
+    function drawGuideLines() {
+        if (!handwritingCanvas || !handwritingContext) return;
+        
+        const ctx = handwritingContext;
+        const width = handwritingCanvas.width;
+        const height = handwritingCanvas.height;
+        
+        ctx.save();
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        
+        // 绘制中心十字线
+        ctx.beginPath();
+        ctx.moveTo(width / 2, 0);
+        ctx.lineTo(width / 2, height);
+        ctx.moveTo(0, height / 2);
+        ctx.lineTo(width, height / 2);
+        ctx.stroke();
+        
+        // 绘制九宫格
+        ctx.beginPath();
+        ctx.moveTo(width / 3, 0);
+        ctx.lineTo(width / 3, height);
+        ctx.moveTo(width * 2 / 3, 0);
+        ctx.lineTo(width * 2 / 3, height);
+        ctx.moveTo(0, height / 3);
+        ctx.lineTo(width, height / 3);
+        ctx.moveTo(0, height * 2 / 3);
+        ctx.lineTo(width, height * 2 / 3);
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+
 
     // 注册菜单命令
     GM_registerMenuCommand('⚙️ 打开配置页面', () => {
         openConfig();
+    });
+
+    GM_registerMenuCommand('✍️ 手写识别', () => {
+        openHandwriting();
     });
 
     GM_registerMenuCommand('🔄 切换启用状态', () => {
@@ -952,5 +1756,5 @@
         alert(`识字释文已${config.enabled ? '启用' : '禁用'}`);
     });
 
-    console.log('识字释文 HanziWhisper v0.1.0 已加载');
+    console.log('识字释文 HanziWhisper v0.3.0 已加载 - 已优化手写识别');
 })();
