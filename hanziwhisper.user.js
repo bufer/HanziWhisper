@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         识字释文 HanziWhisper
 // @namespace    http://tampermonkey.net/
-// @version      0.3.0
+// @version      0.2.0
 // @description  按住Alt键选中汉字，显示拼音、笔画、部首和释义；支持手写输入
 // @author       HanziWhisper
 // @match        *://*/*
@@ -1756,5 +1756,5 @@
         alert(`识字释文已${config.enabled ? '启用' : '禁用'}`);
     });
 
-    console.log('识字释文 HanziWhisper v0.3.0 已加载 - 已优化手写识别');
+    console.log('识字释文 HanziWhisper v0.2.0 已加载 - 已优化手写识别');
 })();
