@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>识字释文 HanziWhisper - 测试页面</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', 'SimHei', Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            line-height: 1.8;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .section {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            color: #4CAF50;
+            margin-top: 0;
+        }
+        .instruction {
+            background: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .instruction strong {
+            color: #2e7d32;
+        }
+        .test-text {
+            font-size: 18px;
+            padding: 15px;
+            background: #fafafa;
+            border: 1px dashed #ccc;
+            border-radius: 4px;
+        }
+        .poem {
+            font-family: 'KaiTi', '楷体', serif;
+            font-size: 20px;
+            text-align: center;
+            line-height: 2;
+        }
+        .idiom-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .idiom {
+            background: #fff3e0;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 18px;
+        }
+        .non-chinese {
+            color: #666;
+            font-style: italic;
+        }
+        .footer {
+            text-align: center;
+            color: #999;
+            margin-top: 40px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>识字释文 HanziWhisper - 测试页面</h1>
+    
+    <div class="instruction">
+        <strong>使用说明：</strong><br>
+        1. 确保已安装 Tampermonkey 浏览器扩展<br>
+        2. 在 Tampermonkey 中安装 hanziwhisper.user.js 脚本<br>
+        3. <strong>按住 Alt 键</strong>，然后用鼠标选中页面中的任意汉字<br>
+        4. 松开鼠标后，会弹出浮动窗口显示该汉字的拼音、笔画、部首和释义
+    </div>
+
+    <div class="section">
+        <h2>1. 基础汉字测试</h2>
+        <p class="test-text">
+            请尝试选中以下汉字：汉字、拼音、笔画、部首、释义、测试、功能、开发、代码、脚本
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>2. 古诗词测试</h2>
+        <div class="poem">
+            <p>静夜思</p>
+            <p>床前明月光，疑是地上霜。</p>
+            <p>举头望明月，低头思故乡。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>3. 成语测试</h2>
+        <div class="idiom-list">
+            <span class="idiom">一马当先</span>
+            <span class="idiom">画龙点睛</span>
+            <span class="idiom">守株待兔</span>
+            <span class="idiom">掩耳盗铃</span>
+            <span class="idiom">刻舟求剑</span>
+            <span class="idiom">亡羊补牢</span>
+            <span class="idiom">井底之蛙</span>
+            <span class="idiom">狐假虎威</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>4. 繁体字测试</h2>
+        <p class="test-text">
+            繁體字測試：漢字、拼音、筆畫、部首、釋義、功能、開發、代碼、腳本
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>5. 非中文测试</h2>
+        <p class="test-text non-chinese">
+            English text: Hello World, this is a test for non-Chinese characters.<br>
+            数字测试：1234567890<br>
+            符号测试：!@#$%^&*()_+-=[]{}|;':",./<>?
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>6. 混合文本测试</h2>
+        <p class="test-text">
+            这是一个混合文本的测试，包含中文汉字、English words、数字123和符号!@#。请尝试选中其中的汉字部分。
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>7. 生僻字测试</h2>
+        <p class="test-text">
+            生僻字：龘、靐、鱻、麤、爨、灪、籱、飝、龗、龖
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>8. 配置测试</h2>
+        <p>
+            点击 Tampermonkey 图标 → 找到"识字释文 HanziWhisper"脚本 → 可以访问以下菜单项：
+        </p>
+        <ul>
+            <li>⚙️ 打开配置面板 - 自定义显示选项和快捷键</li>
+            <li>🔧 重置为默认配置 - 恢复默认设置</li>
+            <li>✅ 启用/禁用脚本 - 切换脚本状态</li>
+        </ul>
+    </div>
+
+    <div class="footer">
+        <p>HanziWhisper v0.1.0 - 识字释文</p>
+        <p>按住 Alt 键选中汉字，查看拼音、笔画、部首和释义</p>
+    </div>
+</body>
+</html>
