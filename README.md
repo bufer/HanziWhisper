@@ -129,7 +129,7 @@ MIT License
 
 ## 联系方式
 
-- GitHub: [HanziWhisper](https://github.com/buferlee/HanziWhisper)
+- GitHub: [HanziWhisper](https://github.com/bufer/HanziWhisper)
 - Email: buferlee@gmail.com
 
 ## 更新日志
@@ -141,7 +141,7 @@ MIT License
 - 支持拼音、笔画、部首、词组、释义显示
 - 支持自定义配置
 
-### v0.2.0 (2026-02-11)
+### v0.2.0 (2026-02-12)
 
 - 实现可视化配置页面
 - 支持手写识别、弹窗播放读音、U模式输入提示
