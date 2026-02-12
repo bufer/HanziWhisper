@@ -2,7 +2,7 @@
 // @name         识字释文 HanziWhisper
 // @namespace    http://tampermonkey.net/
 // @version      0.2.0
-// @description  按住Alt键选中汉字，显示拼音、笔画、部首和释义；支持手写输入
+// @description  选中汉字后按下快捷键，显示拼音、笔画、部首和释义；支持手写输入
 // @author       HanziWhisper
 // @match        *://*/*
 // @grant        GM_setValue
@@ -12,7 +12,6 @@
 // @connect      fastly.jsdelivr.net
 // @connect      api.easyocr.org
 // @require      https://fastly.jsdelivr.net/npm/cnchar-all/cnchar.all.min.js
-// @require      https://fastly.jsdelivr.net/npm/cnchar-draw/cnchar.draw.min.js
 // @require      https://cdn.jsdelivr.net/npm/tesseract.js@5.0.0/dist/tesseract.min.js
 // @run-at       document-end
 // ==/UserScript==
@@ -20,6 +19,9 @@
 (function() {
     'use strict';
 
+////////////////////////////////////////////////////////////////////////
+// 配置页面相关代码
+////////////////////////////////////////////////////////////////////////
     // 默认配置
     const DEFAULT_CONFIG = {
         hotkey: 'Shift+Alt+Z',
@@ -28,8 +30,8 @@
         showStroke: true,
         showRadical: true,
         showExplain: true,
-        showTrad: false,
-        autoPlayAudio: false,
+        showWords: false,
+        drawStrokeAnim: true,
         popupPosition: 'auto',
         theme: 'auto',
         popupWidth: 280,
@@ -105,321 +107,6 @@
     // 检测是否为中文
     function isChinese(text) {
         return /[\u4e00-\u9fa5]/.test(text);
-    }
-
-    // 获取汉字信息
-    async function getHanziInfo(text) {
-        if (!text || !isChinese(text)) {
-            return null;
-        }
-
-        try {
-            const info = {
-                text: text,
-                pinyin: config.showPinyin ? cnchar.spell(text, 'tone') : '',
-                stroke: config.showStroke ? cnchar.stroke(text, 'array') : 0,
-                radical: config.showRadical ? await cnchar.radical(text) : '',
-                explain: config.showExplain ? await cnchar.explain(text) : '',
-                trad: config.showTrad ? cnchar.convert(text, 'trad') : ''
-            };
-            return info;
-        } catch (e) {
-            console.error('HanziWhisper: 获取汉字信息失败', e);
-            return null;
-        }
-    }
-
-    // 创建弹窗样式
-    function createPopupStyles() {
-        return `
-            .hw-popup {
-                position: fixed;
-                z-index: 2147483647;
-                background: #ffffff;
-                border: 1px solid #e0e0e0;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                padding: 16px;
-                min-width: 200px;
-                max-width: 300px;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-                font-size: 14px;
-                line-height: 1.6;
-                color: #333;
-            }
-            .hw-popup.dark {
-                background: #1e1e1e;
-                border-color: #333;
-                color: #e0e0e0;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            }
-            .hw-popup-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 12px;
-                padding-bottom: 8px;
-                border-bottom: 1px solid #f0f0f0;
-            }
-            .hw-popup.dark .hw-popup-header {
-                border-bottom-color: #333;
-            }
-            .hw-popup-title {
-                font-size: 24px;
-                font-weight: bold;
-                color: #1976d2;
-            }
-            .hw-popup.dark .hw-popup-title {
-                color: #64b5f6;
-            }
-            .hw-popup-close {
-                cursor: pointer;
-                color: #999;
-                font-size: 18px;
-                padding: 4px;
-                line-height: 1;
-            }
-            .hw-popup-close:hover {
-                color: #333;
-            }
-            .hw-popup.dark .hw-popup-close {
-                color: #999;
-            }
-            .hw-popup.dark .hw-popup-close:hover {
-                color: #fff;
-            }
-            .hw-popup-content {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            .hw-popup-row {
-                display: flex;
-                align-items: baseline;
-            }
-            .hw-popup-label {
-                color: #666;
-                min-width: 60px;
-                font-weight: 500;
-            }
-            .hw-popup.dark .hw-popup-label {
-                color: #aaa;
-            }
-            .hw-popup-value {
-                color: #333;
-                flex: 1;
-            }
-            .hw-popup.dark .hw-popup-value {
-                color: #e0e0e0;
-            }
-            .hw-popup-pinyin {
-                color: #1976d2;
-                font-size: 16px;
-            }
-            .hw-popup.dark .hw-popup-pinyin {
-                color: #64b5f6;
-            }
-            .hw-popup-explain {
-                color: #555;
-                font-size: 13px;
-                line-height: 1.5;
-            }
-            .hw-popup.dark .hw-popup-explain {
-                color: #ccc;
-            }
-            .hw-popup-non-chinese {
-                color: #f44336;
-                text-align: center;
-                padding: 20px 0;
-            }
-            .hw-popup.dark .hw-popup-non-chinese {
-                color: #ff7043;
-            }
-            .hw-popup-loading {
-                text-align: center;
-                color: #999;
-                padding: 20px 0;
-            }
-            .hw-popup.dark .hw-popup-loading {
-                color: #888;
-            }
-            .hw-popup-stroke-container {
-                display: flex;
-                justify-content: center;
-                margin: 12px 0;
-                border-top: 1px solid #f0f0f0;
-                padding-top: 12px;
-            }
-            .hw-popup.dark .hw-popup-stroke-container {
-                border-top-color: #333;
-            }
-            .hw-popup-stroke-item {
-                margin: 0 8px;
-            }
-            .hanzi-writer {
-                display: inline-block;
-            }
-        `;
-    }
-
-    // 创建弹窗
-    function createPopup() {
-        if (shadowHost) {
-            return;
-        }
-
-        shadowHost = document.createElement('div');
-        shadowHost.id = 'hw-shadow-host';
-        document.body.appendChild(shadowHost);
-
-        shadowRoot = shadowHost.attachShadow({ mode: 'open' });
-
-        const style = document.createElement('style');
-        style.textContent = createPopupStyles();
-        shadowRoot.appendChild(style);
-
-        popup = document.createElement('div');
-        popup.className = 'hw-popup';
-        popup.style.display = 'none';
-        shadowRoot.appendChild(popup);
-    }
-
-    // 显示弹窗
-    function showPopup(x, y, info, selectedText) {
-        if (!popup) {
-            createPopup();
-        }
-
-        let content = '';
-        // 检查选中文本长度
-        if (selectedText && selectedText.length > 50) {
-            content = `<div class="hw-popup-non-chinese" style="color:#ff9800;white-space:normal;">内容过长 (超过50字)<br>请缩减选中内容为单字、词语或诗句</div>`;
-        } else if (info && info.text && !info.pinyin) {
-            content = `
-                <div class="hw-popup-header">
-                    <span class="hw-popup-title">${info.text}</span>
-                    <span class="hw-popup-play" title="播放读音" style="cursor:pointer;font-size:18px;margin-left:8px;">🔊</span>
-                    <span class="hw-popup-close">×</span>
-                </div>
-                <div class="hw-popup-content">
-                    <div class="hw-popup-loading">加载中...</div>
-                </div>`;
-        } else if (info && info.text) {
-            content = `
-                <div class="hw-popup-header">
-                    <span class="hw-popup-title">${info.text}</span>
-                    <span class="hw-popup-play" title="播放读音" style="cursor:pointer;font-size:18px;margin-left:8px;">🔊</span>
-                    <span class="hw-popup-close">×</span>
-                </div>
-                <div class="hw-popup-content">
-                    ${config.showPinyin && info.pinyin ? `<div class="hw-popup-row">
-                        <span class="hw-popup-label">拼音:</span>
-                        <span class="hw-popup-value hw-popup-pinyin">${info.pinyin}</span>
-                    </div>` : ''}
-                    ${config.showStroke && info.stroke ? `<div class="hw-popup-row">
-                        <span class="hw-popup-label">笔画:</span>
-                        <span class="hw-popup-value">${Array.isArray(info.stroke) ? info.stroke.join(' ') : info.stroke}</span>
-                    </div>` : ''}
-                    ${config.showRadical && info.radical ? `<div class="hw-popup-row">
-                        <span class="hw-popup-label">部首:</span>
-                        <span class="hw-popup-value">${Array.isArray(info.radical) ? info.radical.map(item => item.radical).join(' ') : info.radical}</span>
-                    </div>` : ''}
-                    ${config.showTrad && info.trad ? `<div class="hw-popup-row">
-                        <span class="hw-popup-label">繁体:</span>
-                        <span class="hw-popup-value">${info.trad}</span>
-                    </div>` : ''}
-                    ${config.showExplain && info.explain ? `<div class="hw-popup-row">
-                        <span class="hw-popup-label">释义:</span>
-                        <span class="hw-popup-value hw-popup-explain">${Array.isArray(info.explain) ? info.explain.join('<br>') : info.explain}</span>
-                    </div>` : ''}
-                </div>
-                ${info.drawContainer ? info.drawContainer : ''}
-            `;
-        } else {
-            content = '<div class="hw-popup-non-chinese">无有效信息</div>';
-        }
-
-        popup.innerHTML = content;
-
-        // 确定弹窗主题
-        let themeClass = '';
-        if (config.theme === 'auto') {
-            const detectedTheme = detectBackgroundBrightness();
-            themeClass = detectedTheme === 'dark' ? 'dark' : '';
-        } else if (config.theme === 'dark') {
-            themeClass = 'dark';
-        }
-
-        // 应用主题类
-        popup.className = 'hw-popup' + (themeClass ? ' ' + themeClass : '');
-
-        // 使用 addEventListener 绑定 Shadow DOM 内的关闭按钮
-        const popupCloseBtn = popup.querySelector('.hw-popup-close');
-        if (popupCloseBtn) {
-            popupCloseBtn.addEventListener('click', hidePopup);
-        }
-        // 绑定播放按钮
-        const popupPlayBtn = popup.querySelector('.hw-popup-play');
-        if (popupPlayBtn && info && info.text) {
-            popupPlayBtn.addEventListener('click', () => {
-                playHanziAudio(info.text);
-            });
-        }
-        popup.style.display = 'block';
-    // 播放汉字读音
-    function playHanziAudio(text) {
-        if (!text) return;
-        // 优先使用浏览器SpeechSynthesis
-        if ('speechSynthesis' in window) {
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = 'zh-CN';
-            utter.rate = 1;
-            utter.pitch = 1;
-            window.speechSynthesis.speak(utter);
-        } else {
-            // 兼容方案：可扩展为调用第三方API
-            alert('当前浏览器不支持语音播放功能');
-        }
-    }
-
-        // 计算弹窗位置
-        const popupRect = popup.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-
-        let finalX = x + 10;
-        let finalY = y + 10;
-
-        // 防止超出右边界
-        if (finalX + popupRect.width > viewportWidth) {
-            finalX = x - popupRect.width - 10;
-        }
-
-        // 防止超出下边界
-        if (finalY + popupRect.height > viewportHeight) {
-            finalY = y - popupRect.height - 10;
-        }
-
-        // 确保不超出左边界和上边界
-        finalX = Math.max(10, finalX);
-        finalY = Math.max(10, finalY);
-
-        popup.style.left = finalX + 'px';
-        popup.style.top = finalY + 'px';
-
-        // 如果有绘制动画回调，执行它
-        if (info && info.onRenderComplete) {
-            setTimeout(() => {
-                info.onRenderComplete();
-            }, 50);
-        }
-    }
-
-    // 隐藏弹窗
-    function hidePopup() {
-        if (popup) {
-            popup.style.display = 'none';
-        }
     }
 
     // 创建配置页面样式
@@ -665,22 +352,15 @@
                                     <div class="hw-config-description">按住快捷键选中汉字时显示信息</div>
                                 </div>
                                 <select class="hw-config-select" id="hw-config-hotkey">
-                                    <option value="Shift+Alt" ${currentConfig.hotkey === 'Shift+Alt+Z' ? 'selected' : ''}>Shift + Alt + Z</option>
-                                    <option value="Ctrl+Alt" ${currentConfig.hotkey === 'Shift+Ctrl+Alt+Z' ? 'selected' : ''}>Shift + Ctrl + Alt + Z</option>
-                                    <option value="Ctrl+Alt" ${currentConfig.hotkey === 'Ctrl+Alt+Z' ? 'selected' : ''}>Ctrl + Alt + Z</option>
-                                    <option value="Alt" ${currentConfig.hotkey === 'Alt+Z' ? 'selected' : ''}>Alt + Z</option>
+                                    <option value="Shift+Alt+Z" ${currentConfig.hotkey === 'Shift+Alt+Z' ? 'selected' : ''}>Shift + Alt + Z</option>
+                                    <option value="Shift+Ctrl+Alt+Z" ${currentConfig.hotkey === 'Shift+Ctrl+Alt+Z' ? 'selected' : ''}>Shift + Ctrl + Alt + Z</option>
+                                    <option value="Ctrl+Alt+Z" ${currentConfig.hotkey === 'Ctrl+Alt+Z' ? 'selected' : ''}>Ctrl + Alt + Z</option>
+                                    <option value="Alt+Z" ${currentConfig.hotkey === 'Alt+Z' ? 'selected' : ''}>Alt + Z</option>
                                 </select>
                             </div>
                         </div>
                         <div class="hw-config-section">
                             <div class="hw-config-section-title">显示内容</div>
-                            <div class="hw-config-item">
-                                <div class="hw-config-label">显示拼音</div>
-                                <label class="hw-config-toggle">
-                                    <input type="checkbox" id="hw-config-showPinyin" ${currentConfig.showPinyin ? 'checked' : ''}>
-                                    <span class="hw-config-toggle-slider"></span>
-                                </label>
-                            </div>
                             <div class="hw-config-item">
                                 <div class="hw-config-label">显示笔画</div>
                                 <label class="hw-config-toggle">
@@ -703,9 +383,16 @@
                                 </label>
                             </div>
                             <div class="hw-config-item">
-                                <div class="hw-config-label">显示繁体字</div>
+                                <div class="hw-config-label">显示词组</div>
                                 <label class="hw-config-toggle">
-                                    <input type="checkbox" id="hw-config-showTrad" ${currentConfig.showTrad ? 'checked' : ''}>
+                                      <input type="checkbox" id="hw-config-showWords" ${currentConfig.showWords ? 'checked' : ''}>
+                                    <span class="hw-config-toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="hw-config-item">
+                                <div class="hw-config-label">绘制笔顺</div>
+                                <label class="hw-config-toggle">
+                                    <input type="checkbox" id="hw-config-drawStrokeAnim" ${currentConfig.drawStrokeAnim ? 'checked' : ''}>
                                     <span class="hw-config-toggle-slider"></span>
                                 </label>
                             </div>
@@ -740,16 +427,6 @@
                         </div>
                         <div class="hw-config-section">
                             <div class="hw-config-section-title">高级设置</div>
-                            <div class="hw-config-item">
-                                <div>
-                                    <div class="hw-config-label">自动播放读音</div>
-                                    <div class="hw-config-description">显示汉字信息时自动播放读音</div>
-                                </div>
-                                <label class="hw-config-toggle">
-                                    <input type="checkbox" id="hw-config-autoPlayAudio" ${currentConfig.autoPlayAudio ? 'checked' : ''}>
-                                    <span class="hw-config-toggle-slider"></span>
-                                </label>
-                            </div>
                             <div class="hw-config-item">
                                 <div>
                                     <div class="hw-config-label">自动关闭弹窗</div>
@@ -836,7 +513,8 @@
             showStroke: !!($('#hw-config-showStroke') && $('#hw-config-showStroke').checked),
             showRadical: !!($('#hw-config-showRadical') && $('#hw-config-showRadical').checked),
             showExplain: !!($('#hw-config-showExplain') && $('#hw-config-showExplain').checked),
-            showTrad: !!($('#hw-config-showTrad') && $('#hw-config-showTrad').checked),
+            showWords: !!($('#hw-config-showWords') && $('#hw-config-showWords').checked),
+            drawStrokeAnim: !!($('#hw-config-drawStrokeAnim') && $('#hw-config-drawStrokeAnim').checked),
             autoPlayAudio: !!($('#hw-config-autoPlayAudio') && $('#hw-config-autoPlayAudio').checked),
             popupPosition: config.popupPosition,
             theme: ($('#hw-config-theme') && $('#hw-config-theme').value) || config.theme,
@@ -848,6 +526,8 @@
 
         saveConfig(newConfig);
         Object.assign(config, newConfig);
+        // 重新绑定快捷键监听
+        updateHotkeyListener();
         closeConfig();
         // alert('配置已保存！');
     }
@@ -863,104 +543,9 @@
         }
     }
 
-    // 处理文本选择
-    const handleSelection = debounce(async () => {
-        if (!config.enabled) {
-            return;
-        }
-
-        const selection = window.getSelection();
-        const text = selection.toString().trim();
-
-        if (!text) {
-            hidePopup();
-            return;
-        }
-
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-
-        // 检查文本长度是否超过50字
-        if (text.length > 50) {
-            showPopup(rect.left, rect.bottom, null, text);
-            return;
-        }
-
-        // 立即显示加载状态弹窗（只显示选中文本）
-        showPopup(rect.left, rect.bottom, { text: text, pinyin: '', stroke: '', radical: '', explain: '', trad: '' }, text);
-
-        // 异步获取详细信息
-        const info = await getHanziInfo(text);
-
-        if (info) {
-            // 如果字符数 <= 4，生成笔画绘制容器
-            let drawId = 'hw-draw-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
-            let drawContainer = '';
-            if (text.length <= 4) {
-                drawContainer = `<div class="hw-popup-stroke-container" id="${drawId}"></div>`;
-            }
-            info.drawContainer = drawContainer;
-            info.onRenderComplete = () => {
-                // 绘制完成后再进行笔画绘制
-                if (text.length <= 4 && typeof cnchar !== 'undefined' && cnchar.draw) {
-                    try {
-                        setTimeout(() => {
-                            const drawEl = shadowRoot.querySelector('#' + drawId);
-                            if (drawEl) {
-                                cnchar.draw(text, {
-                                    el: drawEl,
-                                    type: 'animation',
-                                    clear: true,
-                                    style: {
-                                        length: 50,
-                                        padding: 10,
-                                        outlineColor: '#ddd',
-                                        strokeColor: '#555',
-                                        backgroundColor: '#fff'
-                                    },
-                                    animation: {
-                                        strokeAnimationSpeed: 1,
-                                        delayBetweenStrokes: 200,
-                                        autoAnimate: true
-                                    }
-                                });
-                            }
-                        }, 0);
-                    } catch (e) {
-                        console.error('HanziWhisper: 绘制笔画失败', e);
-                    }
-                }
-            };
-        }
-
-        // 更新弹窗显示完整信息
-        showPopup(rect.left, rect.bottom, info, text);
-    }, 100);
-
-    // 快捷键事件监听 (Shift+Alt+Z 组合键)
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Shift' || e.shiftKey) isShiftPressed = true;
-        if (e.key === 'Alt' || e.altKey) isAltPressed = true;
-        if ((e.key === 'z' || e.key === 'Z') && e.shiftKey && e.altKey) {
-            isZPressed = true;
-            e.preventDefault();
-            handleSelection();
-        }
-    });
-
-    document.addEventListener('keyup', (e) => {
-        if (e.key === 'Shift') isShiftPressed = false;
-        if (e.key === 'Alt') isAltPressed = false;
-        if (e.key === 'z' || e.key === 'Z') isZPressed = false;
-    });
-
-    // 点击页面其他地方隐藏弹窗
-    document.addEventListener('click', (e) => {
-        if (shadowHost && !shadowHost.contains(e.target)) {
-            hidePopup();
-        }
-    });
-
+//////////////////////////////////////////////////////////
+// 手写识别相关代码
+//////////////////////////////////////////////////////////
     // 创建手写识别页面样式
     function createHandwritingStyles() {
         return `
@@ -1169,7 +754,7 @@
             }
         `;
     }
-
+    
     // 创建手写识别页面 HTML
     function createHandwritingHTML() {
         return `
@@ -1551,6 +1136,7 @@
             return;
         }
 
+        
         // 检查是否有绘制内容
         const imageData = handwritingContext.getImageData(0, 0, handwritingCanvas.width, handwritingCanvas.height);
         const hasContent = imageData.data.some((val, idx) => idx % 4 === 3 && val > 128);
@@ -1564,56 +1150,102 @@
         if (resultItems) {
             resultItems.innerHTML = '<span style="color: #999;">识别中，请稍候...</span>';
         }
-
+        
         try {
-            let text = '';
-            let recognitionMethod = '';
-            
-            // 优先尝试云端API识别（使用原始画布图片，云端API有自己的预处理）
+            let cloudText = '';
+            let localText = '';
+            let cloudRate = 0;
+            let cloudWords = [];
+            let usedCloud = false;
+            let usedLocal = false;
+            let cloudError = null;
+
+            // 优先尝试云端API识别
             try {
                 if (resultItems) {
                     resultItems.innerHTML = '<span style="color: #999;">正在使用云端API识别...</span>';
                 }
-                // 云端API使用原始画布图片
                 const originalImageUrl = handwritingCanvas.toDataURL('image/png');
-                text = await recognizeWithCloudAPI(originalImageUrl);
-                recognitionMethod = 'cloud';
-                console.log('HanziWhisper: 使用云端API识别成功');
-            } catch (apiError) {
-                // 云端API失败，使用本地识别（使用预处理后的图片以提高准确率）
-                console.log('HanziWhisper: 云端API识别失败，切换到本地识别');
-                if (resultItems) {
-                    resultItems.innerHTML = '<span style="color: #999;">云端识别失败，使用本地引擎...</span>';
+                // 直接 fetch 云端API，拿到原始结果
+                const response = await fetch(originalImageUrl);
+                const blob = await response.blob();
+                const formData = new FormData();
+                formData.append('file', blob, 'handwriting.png');
+                const apiResponse = await fetch('https://api.easyocr.org/ocr', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!apiResponse.ok) throw new Error(`API请求失败: ${apiResponse.status}`);
+                const result = await apiResponse.json();
+                if (result && result.words && Array.isArray(result.words) && result.words.length > 0) {
+                    // 按识别率排序
+                    cloudWords = result.words.sort((a, b) => (b.rate || 0) - (a.rate || 0));
+                    cloudText = cloudWords.map(word => word.text).join('');
+                    cloudRate = cloudWords[0]?.rate || 0;
+                    usedCloud = true;
+                } else {
+                    cloudText = '';
+                    cloudRate = 0;
                 }
-                // 本地识别使用预处理后的图片
-                const processedCanvas = preprocessImage(handwritingCanvas);
-                const processedImageUrl = processedCanvas.toDataURL('image/png');
-                text = await recognizeWithLocalOCR(processedImageUrl, resultItems);
-                recognitionMethod = 'local';
-                console.log('HanziWhisper: 使用本地引擎识别成功');
+            } catch (err) {
+                cloudError = err;
+                cloudText = '';
+                cloudRate = 0;
             }
 
-            // 提取汉字并去重
-            const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
-            if (chineseChars.length === 0) {
+            // 判断云端结果是否有效
+            const cloudChinese = cloudText.match(/[\u4e00-\u9fa5]/g) || [];
+            let needLocal = false;
+            if (cloudChinese.length === 0 || cloudRate < 0.6) {
+                needLocal = true;
+            }
+
+            // 本地识别
+            if (needLocal) {
                 if (resultItems) {
-                    resultItems.innerHTML = `<span style="color: #f44336;">未识别到汉字（${recognitionMethod === 'cloud' ? '云端' : '本地'}识别）。<br>提示：请写大一些、清晰一些，或点击下方手动输入</span>`;
+                    resultItems.innerHTML = '<span style="color: #999;">正在使用本地引擎识别...</span>';
                 }
-                // 显示手动输入按钮
+                const processedCanvas = preprocessImage(handwritingCanvas);
+                const processedImageUrl = processedCanvas.toDataURL('image/png');
+                localText = await recognizeWithLocalOCR(processedImageUrl, resultItems);
+                usedLocal = true;
+            }
+
+            // 展示结果
+            let html = '';
+            if (usedCloud) {
+                html += `<div style="margin-bottom:8px;"><strong>云端识别</strong>（置信度: ${(cloudRate * 100).toFixed(1)}%）：<br><span style='color:#1976d2;font-size:18px;'>${cloudText || ' '}</span></div>`;
+            } else if (cloudError) {
+                html += `<div style='color:#f44336;margin-bottom:8px;'><strong>云端识别失败：</strong>${cloudError.message || cloudError}</div>`;
+            }
+            if (usedLocal) {
+                html += `<div style="margin-bottom:8px;"><strong>本地识别</strong>：<br><span style='color:#388e3c;font-size:18px;'>${localText || ' '}</span></div>`;
+            }
+
+            // 取最优结果用于后续弹窗点击
+            let finalChars = [];
+            if (cloudChinese.length > 0 && cloudRate >= 0.6) {
+                finalChars = [...new Set(cloudChinese)].slice(0, 15);
+            } else if (usedLocal && localText) {
+                const localChinese = localText.match(/[\u4e00-\u9fa5]/g) || [];
+                finalChars = [...new Set(localChinese)].slice(0, 15);
+            }
+
+            if (finalChars.length === 0) {
+                html += `<span style="color: #f44336;">未识别到有效汉字。<br>提示：请写大一些、清晰一些，或点击下方手动输入</span>`;
+                if (resultItems) resultItems.innerHTML = html;
                 showManualInputOption();
                 return;
             }
-            const uniqueChars = [...new Set(chineseChars)].slice(0, 15);
-            displayRecognitionResults(uniqueChars);
-            
-            // 在控制台显示识别方式
-            console.log(`HanziWhisper: 识别完成（${recognitionMethod === 'cloud' ? '云端API' : '本地引擎'}），识别到 ${uniqueChars.length} 个汉字:`, uniqueChars.join(''));
+            if (resultItems) resultItems.innerHTML = html;
+            displayRecognitionResults(finalChars);
+            // 控制台输出
+            console.log('HanziWhisper: 云端识别:', cloudText, 'rate:', cloudRate, '本地识别:', localText);
         } catch (e) {
             console.error('HanziWhisper: 手写识别失败', e);
             if (resultItems) {
                 resultItems.innerHTML = '<span style="color: #f44336;">识别出错：' + (e.message || e) + '<br>请尝试重新书写或使用手动输入</span>';
             }
-            // 识别失败时也显示手动输入选项
             setTimeout(() => {
                 showManualInputOption();
             }, 2000);
@@ -1740,8 +1372,481 @@
         ctx.restore();
     }
 
+////////////////////////////////////////////////////////////////////////
+// 弹窗相关代码
+////////////////////////////////////////////////////////////////////////
+    // 创建弹窗样式
+    function createPopupStyles() {
+        return `
+            .hw-popup {
+                position: fixed;
+                z-index: 2147483647;
+                background: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                padding: 16px;
+                min-width: 200px;
+                max-width: 300px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+                color: #333;
+            }
+            .hw-popup.dark {
+                background: #1e1e1e;
+                border-color: #333;
+                color: #e0e0e0;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            }
+            .hw-popup-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 12px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid #f0f0f0;
+            }
+            .hw-popup.dark .hw-popup-header {
+                border-bottom-color: #333;
+            }
+            .hw-popup-title {
+                font-size: 24px;
+                font-weight: bold;
+                color: #1976d2;
+            }
+            .hw-popup.dark .hw-popup-title {
+                color: #64b5f6;
+            }
+            .hw-popup-close {
+                cursor: pointer;
+                color: #999;
+                font-size: 18px;
+                padding: 4px;
+                line-height: 1;
+            }
+            .hw-popup-close:hover {
+                color: #333;
+            }
+            .hw-popup.dark .hw-popup-close {
+                color: #999;
+            }
+            .hw-popup.dark .hw-popup-close:hover {
+                color: #fff;
+            }
+            .hw-popup-content {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .hw-popup-row {
+                display: flex;
+                align-items: baseline;
+            }
+            .hw-popup-label {
+                color: #666;
+                min-width: 60px;
+                font-weight: 500;
+            }
+            .hw-popup.dark .hw-popup-label {
+                color: #aaa;
+            }
+            .hw-popup-value {
+                color: #333;
+                flex: 1;
+            }
+            .hw-popup.dark .hw-popup-value {
+                color: #e0e0e0;
+            }
+            .hw-popup-pinyin {
+                color: #1976d2;
+                font-size: 16px;
+            }
+            .hw-popup.dark .hw-popup-pinyin {
+                color: #64b5f6;
+            }
+            .hw-popup-explain {
+                color: #555;
+                font-size: 13px;
+                line-height: 1.5;
+            }
+            .hw-popup.dark .hw-popup-explain {
+                color: #ccc;
+            }
+            .hw-popup-non-chinese {
+                color: #f44336;
+                text-align: center;
+                padding: 20px 0;
+            }
+            .hw-popup.dark .hw-popup-non-chinese {
+                color: #ff7043;
+            }
+            .hw-popup-loading {
+                text-align: center;
+                color: #999;
+                padding: 20px 0;
+            }
+            .hw-popup.dark .hw-popup-loading {
+                color: #888;
+            }
+            .hw-popup-stroke-container {
+                display: flex;
+                justify-content: center;
+                margin: 12px 0;
+                border-top: 1px solid #f0f0f0;
+                padding-top: 12px;
+            }
+            .hw-popup.dark .hw-popup-stroke-container {
+                border-top-color: #333;
+            }
+            .hw-popup-stroke-item {
+                margin: 0 8px;
+            }
+            .hanzi-writer {
+                display: inline-block;
+            }
+        `;
+    }
 
-    // 注册菜单命令
+    // 创建弹窗
+    function createPopup() {
+        if (shadowHost) {
+            return;
+        }
+
+        shadowHost = document.createElement('div');
+        shadowHost.id = 'hw-shadow-host';
+        document.body.appendChild(shadowHost);
+
+        shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+
+        const style = document.createElement('style');
+        style.textContent = createPopupStyles();
+        shadowRoot.appendChild(style);
+
+        popup = document.createElement('div');
+        popup.className = 'hw-popup';
+        popup.style.display = 'none';
+        shadowRoot.appendChild(popup);
+    }
+
+    // 弹窗自动关闭定时器
+    let popupAutoCloseTimer = null;
+    // 显示弹窗
+    function showPopup(x, y, info, selectedText) {
+        if (!popup) {
+            createPopup();
+        }
+
+        let content = '';
+
+        // 检查选中文本长度
+        if (selectedText && selectedText.length > 50) {
+            content = `<div class="hw-popup-non-chinese" style="color:#ff9800;white-space:normal;">内容过长 (超过50字)<br>请缩减选中内容为单字、词语或诗句</div>`;
+        } else if (info && info.text && !info.pinyin) {
+            content = `
+                <div class="hw-popup-header">
+                    <span class="hw-popup-title">${info.text}</span>
+                    <span class="hw-popup-play" title="播放读音" style="cursor:pointer;font-size:18px;margin-left:8px;">🔊</span>
+                    <span class="hw-popup-close">×</span>
+                </div>
+                <div class="hw-popup-content">
+                    <div class="hw-popup-loading">加载中...</div>
+                </div>`;
+        } else if (info && info.text && info.pinyin) {
+            content = `
+                <div class="hw-popup-header">
+                    <span class="hw-popup-title">${info.text}</span>
+                    <span class="hw-popup-play" title="播放读音" style="cursor:pointer;font-size:18px;margin-left:8px;">🔊</span>
+                    <span class="hw-popup-close">×</span>
+                </div>
+                <div class="hw-popup-content">
+                    ${config.showPinyin && info.pinyin ? `<div class="hw-popup-row">
+                        <span class="hw-popup-label">拼音:</span>
+                        <span class="hw-popup-value hw-popup-pinyin">${info.pinyin}</span>
+                    </div>` : ''}
+                    ${config.showStroke && info.stroke ? `<div class="hw-popup-row">
+                        <span class="hw-popup-label">笔画:</span>
+                        <span class="hw-popup-value">${Array.isArray(info.stroke) ? info.stroke.join(' ') : info.stroke}</span>
+                    </div>` : ''}
+                    ${config.showRadical && info.radical ? `<div class="hw-popup-row">
+                        <span class="hw-popup-label">部首:</span>
+                        <span class="hw-popup-value">${Array.isArray(info.radical) ? info.radical.map(item => item.radical).join(' ') : info.radical}</span>
+                    </div>` : ''}
+                    ${config.showWords && info.words ? `<div class="hw-popup-row">
+                        <span class="hw-popup-label">组词:</span>
+                        <span class="hw-popup-value">${Array.isArray(info.words) ? info.words.join('，') : info.words}</span>
+                    </div>` : ''}
+                    ${config.showExplain && info.explain ? `<div class="hw-popup-row">
+                        <span class="hw-popup-label">释义:</span>
+                        <span class="hw-popup-value hw-popup-explain">${Array.isArray(info.explain) ? info.explain.join('<br>') : info.explain}</span>
+                    </div>` : ''}
+                </div>
+                ${info.drawContainer ? info.drawContainer : ''}
+            `;
+        } else {
+            content = content + '<div class="hw-popup-non-chinese">未获取到有效信息</div>';
+        }
+
+        popup.innerHTML = content;
+
+        // 确定弹窗主题
+        let themeClass = '';
+        if (config.theme === 'auto') {
+            const detectedTheme = detectBackgroundBrightness();
+            themeClass = detectedTheme === 'dark' ? 'dark' : '';
+        } else if (config.theme === 'dark') {
+            themeClass = 'dark';
+        }
+
+        // 应用主题类
+        popup.className = 'hw-popup' + (themeClass ? ' ' + themeClass : '');
+
+        // 应用弹窗宽度和字体大小
+        popup.style.minWidth = config.popupWidth ? config.popupWidth + 'px' : '';
+        popup.style.maxWidth = config.popupWidth ? config.popupWidth + 'px' : '';
+        popup.style.fontSize = config.fontSize ? config.fontSize + 'px' : '';
+
+        // 使用 addEventListener 绑定 Shadow DOM 内的关闭按钮
+        const popupCloseBtn = popup.querySelector('.hw-popup-close');
+        if (popupCloseBtn) {
+            popupCloseBtn.addEventListener('click', hidePopup);
+        }
+        // 绑定播放按钮
+        const popupPlayBtn = popup.querySelector('.hw-popup-play');
+        if (popupPlayBtn && info && info.text) {
+            popupPlayBtn.addEventListener('click', () => {
+                playHanziAudio(info.text);
+            });
+        }
+        popup.style.display = 'block';
+
+        // 计算弹窗位置
+        const popupRect = popup.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        let finalX = x + 10;
+        let finalY = y + 10;
+
+        // 防止超出右边界
+        if (finalX + popupRect.width > viewportWidth) {
+            finalX = x - popupRect.width - 10;
+        }
+
+        // 防止超出下边界
+        if (finalY + popupRect.height > viewportHeight) {
+            finalY = y - popupRect.height - 10;
+        }
+
+        // 确保不超出左边界和上边界
+        finalX = Math.max(10, finalX);
+        finalY = Math.max(10, finalY);
+
+        popup.style.left = finalX + 'px';
+        popup.style.top = finalY + 'px';
+
+        // 自动关闭弹窗逻辑
+        if (popupAutoCloseTimer) {
+            clearTimeout(popupAutoCloseTimer);
+            popupAutoCloseTimer = null;
+        }
+        if (config.autoClose) {
+            popupAutoCloseTimer = setTimeout(() => {
+                hidePopup();
+            }, config.closeDelay || 3000);
+        }
+
+        // 如果有绘制动画回调，执行它
+        if (info && info.onRenderComplete) {
+            setTimeout(() => {
+                info.onRenderComplete();
+            }, 50);
+        }
+    }
+
+    // 隐藏弹窗
+    function hidePopup() {
+        if (popup) {
+            popup.style.display = 'none';
+        }
+        if (popupAutoCloseTimer) {
+            clearTimeout(popupAutoCloseTimer);
+            popupAutoCloseTimer = null;
+        }
+    }
+
+////////////////////////////////////////////////////////////////////////
+// 主逻辑代码
+////////////////////////////////////////////////////////////////////////
+
+// 处理文本选择
+    const handleSelection = debounce(async () => {
+        if (!config.enabled) {
+            return;
+        }
+
+        const selection = window.getSelection();
+        const text = selection.toString().trim();
+
+        if (!text) {
+            hidePopup();
+            return;
+        }
+
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        // 检查文本长度是否超过50字
+        if (text.length > 50) {
+            showPopup(rect.left, rect.bottom, null, text);
+            return;
+        }
+
+        // 立即显示加载状态弹窗（只显示选中文本）
+        showPopup(rect.left, rect.bottom, { text: text, pinyin: '', stroke: '', radical: '', explain: '', words: '' }, text);
+
+        // 异步获取详细信息
+        const info = await getHanziInfo(text);
+
+        // 更新弹窗显示完整信息
+        showPopup(rect.left, rect.bottom, info, text);
+    }, 100);
+
+    // 获取汉字信息
+    async function getHanziInfo(text) {
+        if (!text || !isChinese(text)) {
+            return null;
+        }
+
+        try {
+            const info = {
+                text: text,
+                pinyin: config.showPinyin ? await cnchar.spell(text, 'tone') : '',
+                stroke: config.showStroke ? await cnchar.stroke(text, 'array') : 0,
+                radical: config.showRadical ? await cnchar.radical(text) : '',
+                explain: config.showExplain ? await cnchar.explain(text) : '',
+                words: config.showWords ? await cnchar.words(text, 5) : ''
+            };
+            if (config.drawStrokeAnim) {
+                injectStrokeDrawProps(info, text);
+            }
+            return info;
+        } catch (e) {
+            console.error('HanziWhisper: 获取汉字信息失败', e);
+            return null;
+        }
+    }
+
+    // 播放汉字读音
+    function playHanziAudio(text) {
+        if (!text) return;
+        // 优先使用浏览器SpeechSynthesis
+        if ('speechSynthesis' in window) {
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'zh-CN';
+            utter.rate = 1;
+            utter.pitch = 1;
+            window.speechSynthesis.speak(utter);
+        } else {
+            // 兼容方案：可扩展为调用第三方API
+            alert('当前浏览器不支持语音播放功能');
+        }
+    }
+
+    // 注入笔画动画容器和回调，避免重复
+    function injectStrokeDrawProps(info, text) {
+        let drawId = 'hw-draw-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+        let drawContainer = '';
+        if (text.length <= 4) {
+            drawContainer = `<div class="hw-popup-stroke-container" id="${drawId}"></div>`;
+        }
+        info.drawContainer = drawContainer;
+        info.onRenderComplete = () => {
+            if (text.length <= 4 && typeof cnchar !== 'undefined' && cnchar.draw) {
+                try {
+                    setTimeout(() => {
+                        const drawEl = shadowRoot.querySelector('#' + drawId);
+                        if (drawEl) {
+                            cnchar.draw(text, {
+                                el: drawEl,
+                                type: 'animation',
+                                clear: true,
+                                style: {
+                                    length: 50,
+                                    padding: 10,
+                                    outlineColor: '#ddd',
+                                    strokeColor: '#555',
+                                    backgroundColor: '#fff'
+                                },
+                                animation: {
+                                    strokeAnimationSpeed: 1,
+                                    delayBetweenStrokes: 200,
+                                    autoAnimate: true
+                                }
+                            });
+                        }
+                    }, 0);
+                } catch (e) {
+                    console.error('HanziWhisper: 绘制笔画失败', e);
+                }
+            }
+        };
+    }
+
+    // 动态快捷键监听逻辑
+    let hotkeyListener = null;
+    function parseHotkey(hotkeyStr) {
+        // 解析如 "Shift+Alt+Z"，返回 {shift:true,alt:true,ctrl:false,meta:false,key:'z'}
+        const parts = hotkeyStr.toLowerCase().split('+');
+        return {
+            shift: parts.includes('shift'),
+            alt: parts.includes('alt'),
+            ctrl: parts.includes('ctrl'),
+            meta: parts.includes('meta') || parts.includes('cmd') || parts.includes('win'),
+            key: parts.find(k => !['shift','alt','ctrl','meta','cmd','win'].includes(k)) || ''
+        };
+    }
+
+    function hotkeyMatch(e, hotkeyObj) {
+        // 判断事件是否匹配配置的快捷键
+        return (
+            !!hotkeyObj.shift === !!e.shiftKey &&
+            !!hotkeyObj.alt === !!e.altKey &&
+            !!hotkeyObj.ctrl === !!e.ctrlKey &&
+            !!hotkeyObj.meta === !!e.metaKey &&
+            (e.key && e.key.toLowerCase() === hotkeyObj.key)
+        );
+    }
+
+    function updateHotkeyListener() {
+        // 移除旧监听
+        if (hotkeyListener) {
+            document.removeEventListener('keydown', hotkeyListener, true);
+        }
+        const hotkeyObj = parseHotkey(config.hotkey || 'shift+alt+z');
+        hotkeyListener = function(e) {
+            if (hotkeyMatch(e, hotkeyObj)) {
+                e.preventDefault();
+                handleSelection();
+            }
+        };
+        document.addEventListener('keydown', hotkeyListener, true);
+    }
+
+    // 初始化时绑定一次
+    updateHotkeyListener();
+
+    // 点击页面其他地方隐藏弹窗
+    document.addEventListener('click', (e) => {
+        if (shadowHost && !shadowHost.contains(e.target)) {
+            hidePopup();
+        }
+    });
+
+////////////////////////////////////////////////////////////////////////
+// 注册菜单命令
+////////////////////////////////////////////////////////////////////////
     GM_registerMenuCommand('⚙️ 打开配置页面', () => {
         openConfig();
     });
