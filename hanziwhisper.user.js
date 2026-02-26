@@ -1,19 +1,23 @@
 // ==UserScript==
 // @name         识字释文 HanziWhisper
 // @namespace    http://tampermonkey.net/
-// @version      0.2.0
-// @description  选中汉字后按下快捷键，显示拼音、笔画、部首和释义；支持手写输入
+// @version      0.2.1
+// @description  选中汉字后按下快捷键，显示拼音、笔画、部首和释义等；支持手写输入
 // @author       HanziWhisper
+// @license      MIT License
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
 // @connect      fastly.jsdelivr.net
+// @connect      unpkg.com
 // @connect      api.easyocr.org
-// @require      https://fastly.jsdelivr.net/npm/cnchar-all/cnchar.all.min.js
+// @require      https://cdn.jsdelivr.net/npm/cnchar-all@3.2.6/cnchar.all.min.js
 // @require      https://cdn.jsdelivr.net/npm/tesseract.js@5.0.0/dist/tesseract.min.js
 // @run-at       document-end
+// @downloadURL https://update.greasyfork.org/scripts/567565/%E8%AF%86%E5%AD%97%E9%87%8A%E6%96%87%20HanziWhisper.user.js
+// @updateURL https://update.greasyfork.org/scripts/567565/%E8%AF%86%E5%AD%97%E9%87%8A%E6%96%87%20HanziWhisper.meta.js
 // ==/UserScript==
 
 (function() {
@@ -31,6 +35,7 @@
         showRadical: true,
         showExplain: true,
         showWords: false,
+        showTrad: false,
         drawStrokeAnim: true,
         popupPosition: 'auto',
         theme: 'auto',
@@ -362,6 +367,13 @@
                         <div class="hw-config-section">
                             <div class="hw-config-section-title">显示内容</div>
                             <div class="hw-config-item">
+                                <div class="hw-config-label">显示拼音</div>
+                                <label class="hw-config-toggle">
+                                    <input type="checkbox" id="hw-config-showPinyin" ${currentConfig.showPinyin ? 'checked' : ''}>
+                                    <span class="hw-config-toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="hw-config-item">
                                 <div class="hw-config-label">显示笔画</div>
                                 <label class="hw-config-toggle">
                                     <input type="checkbox" id="hw-config-showStroke" ${currentConfig.showStroke ? 'checked' : ''}>
@@ -386,6 +398,13 @@
                                 <div class="hw-config-label">显示词组</div>
                                 <label class="hw-config-toggle">
                                       <input type="checkbox" id="hw-config-showWords" ${currentConfig.showWords ? 'checked' : ''}>
+                                    <span class="hw-config-toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="hw-config-item">
+                                <div class="hw-config-label">显示繁体</div>
+                                <label class="hw-config-toggle">
+                                    <input type="checkbox" id="hw-config-showTrad" ${currentConfig.showTrad ? 'checked' : ''}>
                                     <span class="hw-config-toggle-slider"></span>
                                 </label>
                             </div>
@@ -514,6 +533,7 @@
             showRadical: !!($('#hw-config-showRadical') && $('#hw-config-showRadical').checked),
             showExplain: !!($('#hw-config-showExplain') && $('#hw-config-showExplain').checked),
             showWords: !!($('#hw-config-showWords') && $('#hw-config-showWords').checked),
+            showTrad: !!($('#hw-config-showTrad') && $('#hw-config-showTrad').checked),
             drawStrokeAnim: !!($('#hw-config-drawStrokeAnim') && $('#hw-config-drawStrokeAnim').checked),
             autoPlayAudio: !!($('#hw-config-autoPlayAudio') && $('#hw-config-autoPlayAudio').checked),
             popupPosition: config.popupPosition,
@@ -754,7 +774,7 @@
             }
         `;
     }
-    
+
     // 创建手写识别页面 HTML
     function createHandwritingHTML() {
         return `
@@ -865,7 +885,7 @@
     // 初始化画布事件
     function initCanvasEvents() {
         const canvas = handwritingCanvas;
-        
+
         canvas.addEventListener('mousedown', (e) => {
             isDrawing = true;
             const rect = canvas.getBoundingClientRect();
@@ -957,60 +977,60 @@
         tempCanvas.height = canvas.height;
         const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
         tempCtx.drawImage(canvas, 0, 0);
-        
+
         let imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
         const data = imgData.data;
-        
+
         // 步骤1: 转换为灰度图
         const grayData = new Uint8Array(tempCanvas.width * tempCanvas.height);
         for (let i = 0; i < data.length; i += 4) {
             const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
             grayData[i / 4] = gray;
         }
-        
+
         // 步骤2: 计算Otsu阈值（自适应二值化）
         const histogram = new Array(256).fill(0);
         for (let i = 0; i < grayData.length; i++) {
             histogram[grayData[i]]++;
         }
-        
+
         const total = grayData.length;
         let sum = 0;
         for (let i = 0; i < 256; i++) {
             sum += i * histogram[i];
         }
-        
+
         let sumB = 0;
         let wB = 0;
         let wF = 0;
         let maxVariance = 0;
         let threshold = 0;
-        
+
         for (let t = 0; t < 256; t++) {
             wB += histogram[t];
             if (wB === 0) continue;
-            
+
             wF = total - wB;
             if (wF === 0) break;
-            
+
             sumB += t * histogram[t];
             const mB = sumB / wB;
             const mF = (sum - sumB) / wF;
             const variance = wB * wF * (mB - mF) * (mB - mF);
-            
+
             if (variance > maxVariance) {
                 maxVariance = variance;
                 threshold = t;
             }
         }
-        
+
         // 步骤3: 应用二值化（反色处理，黑字白底）
         for (let i = 0; i < grayData.length; i++) {
             const value = grayData[i] > threshold ? 255 : 0;
             const idx = i * 4;
             data[idx] = data[idx + 1] = data[idx + 2] = value;
         }
-        
+
         // 步骤4: 形态学处理 - 去除噪点（可选的中值滤波）
         const filterRadius = 1;
         const filtered = new Uint8ClampedArray(data);
@@ -1029,10 +1049,10 @@
                 filtered[idx] = filtered[idx + 1] = filtered[idx + 2] = median;
             }
         }
-        
+
         imgData.data.set(filtered);
         tempCtx.putImageData(imgData, 0, 0);
-        
+
         return tempCanvas;
     }
 
@@ -1042,23 +1062,23 @@
             // 将 base64 图片转换为 Blob
             const response = await fetch(imageDataUrl);
             const blob = await response.blob();
-            
+
             // 创建 FormData
             const formData = new FormData();
             formData.append('file', blob, 'handwriting.png');
-            
+
             // 调用云端API (EasyOCR)
             const apiResponse = await fetch('https://api.easyocr.org/ocr', {
                 method: 'POST',
                 body: formData
             });
-            
+
             if (!apiResponse.ok) {
                 throw new Error(`API请求失败: ${apiResponse.status}`);
             }
-            
+
             const result = await apiResponse.json();
-            
+
             // 解析新的返回格式: { "words": [{ "text": "十", "rate": 0.93, ... }] }
             if (result && result.words && Array.isArray(result.words) && result.words.length > 0) {
                 // 提取所有识别到的文字，按识别率排序
@@ -1090,7 +1110,7 @@
             } else if (Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
                 createWorker = Tesseract.default.createWorker;
             }
-            
+
             if (createWorker) {
                 if (resultItems) {
                     resultItems.innerHTML = '<span style="color: #999;">首次加载本地OCR引擎，请稍候...</span>';
@@ -1098,7 +1118,7 @@
                 window.hwTesseractWorker = await createWorker('chi_sim+chi_tra', 1, {
                     logger: m => console.log('OCR:', m)
                 });
-                
+
                 // 设置优化参数，提高手写汉字识别率
                 await window.hwTesseractWorker.setParameters({
                     tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK, // 单个文字块模式
@@ -1125,7 +1145,7 @@
         } else {
             throw new Error('Tesseract.js 加载失败或API不兼容');
         }
-        
+
         return text;
     }
 
@@ -1136,7 +1156,7 @@
             return;
         }
 
-        
+
         // 检查是否有绘制内容
         const imageData = handwritingContext.getImageData(0, 0, handwritingCanvas.width, handwritingCanvas.height);
         const hasContent = imageData.data.some((val, idx) => idx % 4 === 3 && val > 128);
@@ -1150,7 +1170,7 @@
         if (resultItems) {
             resultItems.innerHTML = '<span style="color: #999;">识别中，请稍候...</span>';
         }
-        
+
         try {
             let cloudText = '';
             let localText = '';
@@ -1300,7 +1320,7 @@
 
         const resultItems = handwritingShadowRoot.querySelector('#hw-handwriting-result-items');
         const insertBtn = handwritingShadowRoot.querySelector('#hw-handwriting-insert');
-        
+
         if (!resultItems) return;
 
         // 取前10个结果
@@ -1315,7 +1335,7 @@
             item.addEventListener('click', async () => {
                 items.forEach(i => i.classList.remove('selected'));
                 item.classList.add('selected');
-                
+
                 const char = item.getAttribute('data-char');
                 // 直接显示汉字信息弹窗
                 if (char) {
@@ -1339,16 +1359,16 @@
     // 在画布上绘制辅助网格线
     function drawGuideLines() {
         if (!handwritingCanvas || !handwritingContext) return;
-        
+
         const ctx = handwritingContext;
         const width = handwritingCanvas.width;
         const height = handwritingCanvas.height;
-        
+
         ctx.save();
         ctx.strokeStyle = '#e0e0e0';
         ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
-        
+
         // 绘制中心十字线
         ctx.beginPath();
         ctx.moveTo(width / 2, 0);
@@ -1356,7 +1376,7 @@
         ctx.moveTo(0, height / 2);
         ctx.lineTo(width, height / 2);
         ctx.stroke();
-        
+
         // 绘制九宫格
         ctx.beginPath();
         ctx.moveTo(width / 3, 0);
@@ -1368,7 +1388,7 @@
         ctx.moveTo(0, height * 2 / 3);
         ctx.lineTo(width, height * 2 / 3);
         ctx.stroke();
-        
+
         ctx.restore();
     }
 
@@ -1539,11 +1559,11 @@
         }
 
         let content = '';
-
+        // 显示选中文本的信息
         // 检查选中文本长度
         if (selectedText && selectedText.length > 50) {
             content = `<div class="hw-popup-non-chinese" style="color:#ff9800;white-space:normal;">内容过长 (超过50字)<br>请缩减选中内容为单字、词语或诗句</div>`;
-        } else if (info && info.text && !info.pinyin) {
+        } else if (info && info.text && !info.pinyin && !info.stroke && !info.radical && !info.words && !info.explain && !info.trad) {
             content = `
                 <div class="hw-popup-header">
                     <span class="hw-popup-title">${info.text}</span>
@@ -1553,7 +1573,7 @@
                 <div class="hw-popup-content">
                     <div class="hw-popup-loading">加载中...</div>
                 </div>`;
-        } else if (info && info.text && info.pinyin) {
+        } else if (info && info.text) {
             content = `
                 <div class="hw-popup-header">
                     <span class="hw-popup-title">${info.text}</span>
@@ -1726,7 +1746,8 @@
                 stroke: config.showStroke ? await cnchar.stroke(text, 'array') : 0,
                 radical: config.showRadical ? await cnchar.radical(text) : '',
                 explain: config.showExplain ? await cnchar.explain(text) : '',
-                words: config.showWords ? await cnchar.words(text, 5) : ''
+                words: config.showWords ? await cnchar.words(text, 5) : '',
+                trad: config.showTrad ? await cnchar.convert.simpleToTrad(text) : ''
             };
             if (config.drawStrokeAnim) {
                 injectStrokeDrawProps(info, text);
@@ -1861,5 +1882,5 @@
         alert(`识字释文已${config.enabled ? '启用' : '禁用'}`);
     });
 
-    console.log('识字释文 HanziWhisper v0.2.0 已加载 - 已优化手写识别');
+    console.log('识字释文 HanziWhisper v0.2.1 已加载 - 已优化手写识别');
 })();
